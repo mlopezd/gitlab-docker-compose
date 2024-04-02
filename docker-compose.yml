@@ -1,0 +1,95 @@
+version: '3.7'
+services:
+  gitlab-ce:
+    image: 'gitlab/gitlab-ce:16.3.4-ce.0'
+    restart: always
+    hostname: 'gitlab.local'
+    container_name: gitlab-ce
+    environment:
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url 'https://gitlab.local:8443'
+
+        gitlab_rails['gitlab_shell_ssh_port'] = 2224
+        
+        registry_external_url 'https://gitlab.local:5005'
+
+        gitlab_rails['registry_enabled'] = true
+        gitlab_rails['registry_host'] = "gitlab.local"
+        gitlab_rails['registry_port'] = "5005"
+        gitlab_rails['registry_path'] = "/var/opt/gitlab/gitlab-rails/shared/registry"
+
+        gitlab_rails['initial_root_password'] = '${INITIAL_ROOT_PASSWORD}'
+        gitlab_rails['time_zone'] = '${TIMEZONE}'
+
+        letsencrypt['enable'] = false
+
+        gitlab_rails['ldap_servers'] = {
+          'main' => {
+            'label' => 'LDAP',
+            'host' =>  '${LDAP_SERVER_HOSTNAME}',
+            'port' => 636,
+            'uid' => 'sAMAccountName',
+            'bind_dn' => '${LDAP_BIND_DN}',
+            'password' => '${LDAP_BIND_PASS}',
+            'encryption' => 'simple_tls',
+            'verify_certificates' => 'false',
+            'active_directory' => 'true',
+            'allow_username_or_email_login' => 'true',
+            'lowercase_usernames' => 'false',
+            'block_auto_created_users' => 'false',
+            'base' => '${LDAP_BIND_BASE}',
+            'user_filter' => '(objectClass=Person)'
+            }
+        }
+
+        nginx['enable'] = true
+        nginx['client_max_body_size'] = '250m'
+        nginx['redirect_http_to_https'] = true
+        nginx['redirect_http_to_https_port'] = 80
+        
+        nginx['ssl_certificate'] = "/etc/gitlab/ssl/gitlab.local.crt"
+        nginx['ssl_certificate_key'] = "/etc/gitlab/ssl/gitlab.local.key"
+        nginx['ssl_ciphers'] = "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384"
+        nginx['ssl_protocols'] = "TLSv1.2 TLSv1.3"
+        nginx['listen_addresses'] = ['*', '[::]']
+        nginx['gzip_enabled'] = true
+        nginx['listen_port'] = 8443
+        
+        registry_nginx['enable'] = true
+      
+      GITLAB_POST_RECONFIGURE_SCRIPT: bash /etc/gitlab/scripts/post-reconfigure.sh
+      TZ: ${TIMEZONE}
+    ports:
+      - '2224:22'
+      - '5005:5005'
+      - '8443:8443'
+    volumes:
+      - ./gitlab/config:/etc/gitlab
+      - ./gitlab/logs:/var/log/gitlab
+      - ./gitlab/data:/var/opt/gitlab
+      - ./certs:/etc/gitlab/ssl
+      - ./trusted-certs:/etc/gitlab/trusted-certs
+      - ./scripts:/etc/gitlab/scripts
+    networks:
+      gitlab:
+        aliases:
+          - gitlab.local
+    extra_hosts:
+      - "${LDAP_SERVER_HOSTNAME}:${LDAP_SERVER_IP}"
+
+  gitlab-runner:
+    image: gitlab/gitlab-runner:ubuntu-v16.3.1
+    container_name: gitlab-runner
+    restart: always
+    depends_on:
+      - gitlab-ce
+    volumes:
+      - ./gitlab-runner:/etc/gitlab-runner
+      - ./certs:/etc/gitlab-runner/certs
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - gitlab
+
+networks:
+  gitlab:
+    name: gitlab-network
